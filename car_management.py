@@ -6,89 +6,75 @@ st.set_page_config(page_title="ניהול צי רכבים", page_icon="🚗", la
 
 # אתחול בסיס הנתונים בזיכרון
 if 'bookings' not in st.session_state:
-    st.session_state.bookings = pd.DataFrame(columns=["ID", "עובד", "רכב", "תאריך", "שעת התחלה", "שעת סיום", "סיבה"])
+    st.session_state.bookings = pd.DataFrame(columns=["עובד", "רכב", "תאריך", "שעת התחלה", "שעת סיום", "סיבה"])
 
-st.title("🚗 יומן רכבים חכם - ניהול ותפעול")
+st.title("🚗 יומן רכבים - רשימת הזמנות")
 
-# רשימת רכבים
-cars = ["11111111", "2222222"]
-
-# --- פונקציות עזר ---
-def delete_booking(index):
-    st.session_state.bookings = st.session_state.bookings.drop(index).reset_index(drop=True)
-    st.rerun()
-
-# --- ממשק הזמנה (Sidebar) ---
+# --- תפריט צד להזמנה ---
 with st.sidebar:
-    st.header("ביצוע הזמנה חדשה")
+    st.header("הזמנת רכב")
     user_name = st.text_input("שם העובד")
-    selected_car = st.selectbox("בחר רכב", cars)
+    selected_car = st.selectbox("בחר רכב", ["11111111", "2222222"])
     booking_date = st.date_input("תאריך", datetime.now())
+    start_t = st.time_input("התחלה", time(9, 0))
+    end_t = st.time_input("סיום", time(10, 0))
+    reason = st.text_input("סיבה")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        start_t = st.time_input("שעת התחלה", time(9, 0))
-    with col2:
-        end_t = st.time_input("שעת סיום", time(10, 0))
-    
-    reason = st.text_input("סיבת הנסיעה")
-    submit = st.button("אשר הזמנה")
-
-if submit:
-    if not user_name or not reason:
-        st.error("נא למלא שם וסיבה.")
-    elif start_t >= end_t:
-        st.error("שעת הסיום חייבת להיות אחרי שעת ההתחלה.")
-    elif booking_date < datetime.now().date():
-        st.error("לא ניתן להזמין רכב לתאריך מהעבר.")
-    else:
-        # בדיקת כפילויות
-        df = st.session_state.bookings
-        same_day_car = df[(df['רכב'] == selected_car) & (df['תאריך'] == str(booking_date))]
-        
-        is_conflict = False
-        for _, row in same_day_car.iterrows():
-            exist_start = datetime.strptime(row['שעת התחלה'], '%H:%M').time()
-            exist_end = datetime.strptime(row['שעת סיום'], '%H:%M').time()
-            if start_t < exist_end and end_t > exist_start:
-                is_conflict = True
-                conflict_user = row['עובד']
-                break
-        
-        if is_conflict:
-            st.error(f"הרכב תפוס ע\"י {conflict_user} בשעות אלו.")
-        else:
-            new_booking = {
-                "ID": datetime.now().strftime("%H%M%S"), # מזהה ייחודי למחיקה
-                "עובד": user_name,
-                "רכב": selected_car,
-                "תאריך": str(booking_date),
-                "שעת התחלה": start_t.strftime('%H:%M'),
-                "שעת סיום": end_t.strftime('%H:%M'),
-                "סיבה": reason
-            }
-            st.session_state.bookings = pd.concat([st.session_state.bookings, pd.DataFrame([new_booking])], ignore_index=True)
-            st.success("ההזמנה בוצעה!")
+    if st.button("אשר הזמנה"):
+        if user_name and reason:
+            # בדיקת כפילויות פשוטה
+            new_row = {"עובד": user_name, "רכב": selected_car, "תאריך": str(booking_date), 
+                       "שעת התחלה": start_t.strftime('%H:%M'), "שעת סיום": end_t.strftime('%H:%M'), "סיבה": reason}
+            st.session_state.bookings = pd.concat([st.session_state.bookings, pd.DataFrame([new_row])], ignore_index=True)
             st.rerun()
 
-# --- תצוגת יומן הנסיעות ---
-st.subheader("📋 לו״ז נסיעות עתידי (ממוין לפי תאריך)")
-
-if not st.session_state.bookings.empty:
-    # 1. סינון נסיעות מהעבר (משאיר רק מהיום והלאה)
+# --- עיבוד נתונים (סינון ומיון) ---
+df = st.session_state.bookings.copy()
+if not df.empty:
     today = datetime.now().date()
-    df_display = st.session_state.bookings.copy()
-    df_display['temp_date'] = pd.to_datetime(df_display['תאריך']).dt.date
-    df_display = df_display[df_display['temp_date'] >= today]
-    
-    # 2. מיון: תאריך קרוב למעלה, ואז לפי שעת התחלה
-    df_display = df_display.sort_values(by=['temp_date', 'שעת התחלה'], ascending=[True, True])
-    
-    # הצגה עם כפתורי מחיקה
-    for index, row in df_display.iterrows():
-        with st.expander(f"🚗 {row['תאריך']} | {row['שעת התחלה']}-{row['שעת סיום']} | רכב: {row['רכב']} ({row['עובד']})"):
-            st.write(f"**סיבת הנסיעה:** {row['סיבה']}")
-            if st.button(f"מחק הזמנה", key=f"del_{index}"):
-                delete_booking(index)
+    df['temp_date'] = pd.to_datetime(df['תאריך']).dt.date
+    # סינון עבר ומיון
+    df = df[df['temp_date'] >= today].sort_values(by=['temp_date', 'שעת התחלה'])
+
+# --- תצוגת הרשימה ---
+st.write("### רשימת נסיעות פעילות")
+st.write("---")
+
+if not df.empty:
+    # כותרות לטבלה "הידנית"
+    h_col1, h_col2, h_col3, h_col4, h_col5, h_col6 = st.columns([1.5, 1.5, 1.5, 1.5, 3, 0.5])
+    h_col1.write("**עובד**")
+    h_col2.write("**רכב**")
+    h_col3.write("**תאריך**")
+    h_col4.write("**שעות**")
+    h_col5.write("**סיבה**")
+    h_col6.write("") # עמודת הפח
+    st.write("---")
+
+    for index, row in df.iterrows():
+        col1, col2, col3, col4, col5, col6 = st.columns([1.5, 1.5, 1.5, 1.5, 3, 0.5])
+        
+        col1.write(row['עובד'])
+        col2.write(row['רכב'])
+        col3.write(row['תאריך'])
+        col4.write(f"{row['שעת התחלה']} - {row['שעת סיום']}")
+        col5.write(row['סיבה'])
+        
+        # כפתור מחיקה עם אישור
+        if col6.button("🗑️", key=f"del_{index}"):
+            st.session_state[f"confirm_delete_{index}"] = True
+
+        # מנגנון אישור מחיקה שקופץ מתחת לשורה
+        if st.session_state.get(f"confirm_delete_{index}", False):
+            st.warning(f"למחוק את ההזמנה של {row['עובד']}?")
+            c1, c2, _ = st.columns([1, 1, 8])
+            if c1.button("כן, מחק", key=f"yes_{index}"):
+                st.session_state.bookings = st.session_state.bookings.drop(index).reset_index(drop=True)
+                st.session_state[f"confirm_delete_{index}"] = False
+                st.rerun()
+            if c2.button("ביטול", key=f"no_{index}"):
+                st.session_state[f"confirm_delete_{index}"] = False
+                st.rerun()
+        st.write("---")
 else:
-    st.info("אין הזמנות עתידיות ביומן.")
+    st.info("אין הזמנות עתידיות.")

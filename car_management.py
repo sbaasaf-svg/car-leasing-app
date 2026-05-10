@@ -1,14 +1,28 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, time
+import os
 
 st.set_page_config(page_title="ניהול צי רכבים", page_icon="🚗", layout="wide")
 
-# אתחול הנתונים
-if 'bookings' not in st.session_state:
-    st.session_state.bookings = pd.DataFrame(columns=["עובד", "רכב", "תאריך", "שעת התחלה", "שעת סיום", "סיבה"])
+# --- הגדרת קובץ הנתונים ---
+DATA_FILE = "fleet_data.csv"
 
-st.title("🚗 יומן רכבי ליסינג - מניעת כפילויות")
+def load_data():
+    if os.path.exists(DATA_FILE):
+        df = pd.read_csv(DATA_FILE)
+        # וידוא שהתאריכים והשעות נטענים כטקסט תקין
+        return df
+    return pd.DataFrame(columns=["עובד", "רכב", "תאריך", "שעת התחלה", "שעת סיום", "סיבה"])
+
+def save_data(df):
+    df.to_csv(DATA_FILE, index=False)
+
+# טעינת הנתונים לתוך ה-session_state רק פעם אחת בהרעננה
+if 'bookings' not in st.session_state:
+    st.session_state.bookings = load_data()
+
+st.title("🚗 ניהול צי רכבים - שמירה קבועה")
 
 # --- תפריט צד להזמנה ---
 with st.sidebar:
@@ -29,52 +43,41 @@ with st.sidebar:
         elif start_t >= end_t:
             st.error("שעת הסיום חייבת להיות אחרי שעת ההתחלה.")
         else:
-            # --- לוגיקת בדיקת כפילויות וחפיפת זמנים ---
+            # בדיקת כפילויות
             df = st.session_state.bookings
-            # סינון לאותו רכב ואותו תאריך
             conflicts = df[(df['רכב'] == selected_car) & (df['תאריך'] == str(booking_date))]
             
             is_conflict = False
-            conflict_user = ""
-            
             for _, row in conflicts.iterrows():
-                # המרה של הזמן מהטבלה לצורך השוואה
                 existing_start = datetime.strptime(row['שעת התחלה'], '%H:%M').time()
                 existing_end = datetime.strptime(row['שעת סיום'], '%H:%M').time()
-                
-                # נוסחה לבדיקת חפיפה: (StartA < EndB) וגם (EndA > StartB)
                 if start_t < existing_end and end_t > existing_start:
                     is_conflict = True
                     conflict_user = row['עובד']
                     break
             
             if is_conflict:
-                st.error(f"לא ניתן להזמין! רכב זה תפוס על ידי {conflict_user} בין השעות {existing_start.strftime('%H:%M')} - {existing_end.strftime('%H:%M')}")
+                st.error(f"הרכב תפוס ע\"י {conflict_user}")
             else:
                 new_row = {
-                    "עובד": user_name, 
-                    "רכב": selected_car, 
-                    "תאריך": str(booking_date), 
-                    "שעת התחלה": start_t.strftime('%H:%M'), 
-                    "שעת סיום": end_t.strftime('%H:%M'), 
-                    "סיבה": reason
+                    "עובד": user_name, "רכב": selected_car, "תאריך": str(booking_date), 
+                    "שעת התחלה": start_t.strftime('%H:%M'), "שעת סיום": end_t.strftime('%H:%M'), "סיבה": reason
                 }
                 st.session_state.bookings = pd.concat([st.session_state.bookings, pd.DataFrame([new_row])], ignore_index=True)
-                st.success("ההזמנה בוצעה בהצלחה!")
+                save_data(st.session_state.bookings) # שמירה לקובץ
+                st.success("נשמר!")
                 st.rerun()
 
-# --- עיבוד נתונים לתצוגה ---
+# --- עיבוד והצגה ---
 df_display = st.session_state.bookings.copy()
 if not df_display.empty:
     df_display['temp_date'] = pd.to_datetime(df_display['תאריך']).dt.date
     df_display = df_display[df_display['temp_date'] >= datetime.now().date()]
     df_display = df_display.sort_values(by=['temp_date', 'שעת התחלה'])
 
-# --- תצוגת הרשימה ---
-st.write("### רשימת נסיעות פעילות")
+st.write("### רשימת נסיעות")
 st.write("---")
 
-# כותרות
 h_cols = st.columns([1.5, 1.2, 1.2, 1.5, 3, 0.8])
 h_cols[0].write("**עובד**")
 h_cols[1].write("**רכב**")
@@ -97,16 +100,14 @@ if not df_display.empty:
             st.session_state[f"confirm_{index}"] = True
 
         if st.session_state.get(f"confirm_{index}", False):
-            st.warning(f"למחוק את ההזמנה של {row['עובד']}?")
-            b1, b2 = st.columns([1, 1])
-            if b1.button("✅ אישור", key=f"y_{index}"):
-                # מחיקה לפי אינדקס מקורי מה-session_state
+            st.warning("למחוק?")
+            b1, b2 = st.columns(2)
+            if b1.button("כן", key=f"y_{index}"):
                 st.session_state.bookings = st.session_state.bookings.drop(index).reset_index(drop=True)
+                save_data(st.session_state.bookings) # עדכון הקובץ לאחר מחיקה
                 st.session_state[f"confirm_{index}"] = False
                 st.rerun()
-            if b2.button("❌ ביטול", key=f"n_{index}"):
+            if b2.button("לא", key=f"n_{index}"):
                 st.session_state[f"confirm_{index}"] = False
                 st.rerun()
         st.write("---")
-else:
-    st.info("אין הזמנות עתידיות במערכת.")

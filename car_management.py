@@ -4,19 +4,18 @@ from datetime import datetime, time
 
 st.set_page_config(page_title="ניהול צי רכבים", page_icon="🚗", layout="wide")
 
-# סגנון CSS להקטנת מרווחים (Padding) בין אלמנטים
+# CSS עדין לשיפור הריווח בלי ליצור עומס
 st.markdown("""
     <style>
-    .block-container {padding-top: 1rem; padding-bottom: 0rem;}
-    div[data-testid="stVerticalBlock"] > div {margin-bottom: -1rem;}
-    hr {margin: 0.5rem 0rem;}
+    .stButton button { width: 40px; height: 40px; padding: 0; }
+    hr { margin: 0.8rem 0rem; }
     </style>
     """, unsafe_allow_html=True)
 
 if 'bookings' not in st.session_state:
     st.session_state.bookings = pd.DataFrame(columns=["עובד", "רכב", "תאריך", "שעת התחלה", "שעת סיום", "סיבה"])
 
-st.title("🚗 ניהול צי רכבים - מבט מרוכז")
+st.title("🚗 יומן רכבי ליסינג")
 
 # --- תפריט צד ---
 with st.sidebar:
@@ -36,41 +35,44 @@ with st.sidebar:
             st.session_state.bookings = pd.concat([st.session_state.bookings, pd.DataFrame([new_row])], ignore_index=True)
             st.rerun()
 
-# --- עיבוד נתונים ---
+# --- עיבוד נתונים (סינון ומיון) ---
 df = st.session_state.bookings.copy()
 if not df.empty:
     df['temp_date'] = pd.to_datetime(df['תאריך']).dt.date
+    # מציג רק מהיום והלאה וממיין לפי תאריך ושעה
     df = df[df['temp_date'] >= datetime.now().date()].sort_values(by=['temp_date', 'שעת התחלה'])
 
-# --- תצוגה צפופה ---
-st.markdown("---")
-# כותרות צפופות
-h_cols = st.columns([1, 1, 1, 1.2, 3, 0.4])
-titles = ["**עובד**", "**רכב**", "**תאריך**", "**שעות**", "**סיבה**", ""]
+st.markdown("### רשימת נסיעות")
+st.write("---")
+
+# כותרות - נתנו לעמודת הפח (האחרונה) רוחב ספציפי כדי שלא תתנגש
+h_cols = st.columns([1.5, 1.2, 1.2, 1.5, 3, 0.8])
+titles = ["**עובד**", "**רכב**", "**תאריך**", "**שעות**", "**סיבה**", "**מחיקה**"]
 for col, title in zip(h_cols, titles):
     col.write(title)
-st.markdown("---")
+st.write("---")
 
 if not df.empty:
     for index, row in df.iterrows():
-        # יצירת שורה צפופה
-        cols = st.columns([1, 1, 1, 1.2, 3, 0.4])
-        cols[0].write(row['עובד'])
-        cols[1].write(row['רכב'])
-        cols[2].write(row['תאריך'])
-        cols[3].write(f"{row['שעת התחלה']}-{row['שעת סיום']}")
-        cols[4].write(row['סיבה'])
+        # יצירת שורה עם מרווחים מוגדרים
+        cols = st.columns([1.5, 1.2, 1.2, 1.5, 3, 0.8])
         
-        # כפתור מחיקה קטן במיוחד
-        if cols[5].button("🗑️", key=f"del_{index}"):
+        cols.write(row['עובד'])
+        cols.write(row['רכב'])
+        cols.write(row['תאריך'])
+        cols.write(f"{row['שעת התחלה']} - {row['שעת סיום']}")
+        cols.write(row['סיבה'])
+        
+        # כפתור מחיקה בעמודה מרווחת משלו
+        if cols.button("🗑️", key=f"del_{index}"):
             st.session_state[f"confirm_{index}"] = True
 
-        # אישור מחיקה בשורה נפרדת רק אם נלחץ
+        # הודעת אישור מחיקה במידת הצורך
         if st.session_state.get(f"confirm_{index}", False):
-            with st.container():
-                st.warning(f"למחוק הזמנה של {row['עובד']}?")
-                b1, b2, _ = st.columns([1, 1, 8])
-                if b1.button("✅ אישור", key=f"y_{index}"):
+            with st.status(f"מחיקת ההזמנה של {row['עובד']}", expanded=True):
+                st.write("האם אתה בטוח שברצונך למחוק את ההזמנה?")
+                b1, b2 = st.columns(2)
+                if b1.button("✅ כן, מחק", key=f"y_{index}"):
                     st.session_state.bookings = st.session_state.bookings.drop(index).reset_index(drop=True)
                     st.session_state[f"confirm_{index}"] = False
                     st.rerun()
@@ -78,7 +80,6 @@ if not df.empty:
                     st.session_state[f"confirm_{index}"] = False
                     st.rerun()
         
-        st.markdown("<hr style='margin:0.2rem 0rem; opacity:0.2;'>", unsafe_allow_html=True)
+        st.write("---")
 else:
-    st.info("אין הזמנות פעילות.")
-
+    st.info("אין הזמנות עתידיות במערכת.")

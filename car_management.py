@@ -1,48 +1,88 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, time
+import os
 
-# הגדרות בסיסיות של האפליקציה
-st.set_page_config(page_title="ניהול צי רכבים - חברת ליסינג", page_icon="🚗")
+# הגדרות דף
+st.set_page_config(page_title="ניהול צי רכבים", page_icon="🚗")
 
-st.title("📅 מערכת הזמנת רכבי ליסינג")
-st.subheader("ניהול וסנכרון צי הרכבים הארגוני")
+DATA_FILE = "fleet_bookings.csv"
 
-# נתוני הצי שלנו
-vehicle_numbers = ["11111111", "2222222"]
+# פונקציה לטעינת נתונים
+def load_data():
+    if os.path.exists(DATA_FILE):
+        return pd.read_csv(DATA_FILE)
+    return pd.DataFrame(columns=["עובד", "רכב", "תאריך", "שעת התחלה", "שעת סיום", "סיבה"])
 
-# אתחול בסיס הנתונים (בזיכרון עבור הדוגמה - ניתן לחבר ל-Google Sheets או SQL)
+# פונקציה לשמירת נתונים
+def save_data(df):
+    df.to_csv(DATA_FILE, index=False)
+
+# טעינת נתונים לזיכרון
 if 'bookings' not in st.session_state:
-    st.session_state.bookings = pd.DataFrame(columns=["שם העובד", "מספר רכב", "תאריך", "סיבת הזמנה"])
+    st.session_state.bookings = load_data()
 
-# ממשק הזמנה
-with st.form("booking_form"):
-    st.write("### בצע הזמנה חדשה")
-    user_name = st.text_input("שם מלא")
-    selected_car = st.selectbox("בחר מספר רכב", vehicle_numbers)
-    booking_date = st.date_input("בחר תאריך", datetime.now())
-    reason = st.text_area("הסבר/מטרת הנסיעה")
+st.title("🚗 יומן רכבים חכם")
 
-    submit_button = st.form_submit_button("אשר הזמנה")
+# רשימת רכבים
+cars = ["11111111", "2222222"]
 
-# לוגיקה לשמירת הנתונים
-if submit_button:
-    if user_name and reason:
-        new_booking = pd.DataFrame({
-            "שם העובד": [user_name],
-            "מספר רכב": [selected_car],
-            "תאריך": [booking_date],
-            "סיבת הזמנה": [reason]
-        })
-        st.session_state.bookings = pd.concat([st.session_state.bookings, new_booking], ignore_index=True)
-        st.success(f"הרכב {selected_car} הועבר לטיפולך עבור תאריך {booking_date}!")
+with st.sidebar:
+    st.header("ביצוע הזמנה")
+    user_name = st.text_input("שם העובד")
+    selected_car = st.selectbox("בחר רכב", cars)
+    date = st.date_input("תאריך", datetime.now())
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        start_t = st.time_input("שעת התחלה", time(9, 0))
+    with col2:
+        end_t = st.time_input("שעת סיום", time(17, 0))
+    
+    reason = st.text_input("סיבת הנסיעה")
+    submit = st.button("אשר הזמנה")
+
+if submit:
+    if not user_name or not reason:
+        st.error("נא למלא שם וסיבה.")
+    elif start_t >= end_t:
+        st.error("שעת הסיום חייבת להיות אחרי שעת ההתחלה.")
     else:
-        st.error("נא למלא את כל השדות.")
+        # בדיקת כפילויות (מניעת התנגשות זמנים)
+        df = st.session_state.bookings
+        # סינון הזמנות לאותו רכב באותו יום
+        conflicts = df[(df['רכב'] == selected_car) & (df['תאריך'] == str(date))]
+        
+        is_conflict = False
+        for _, row in conflicts.iterrows():
+            # בדיקת חפיפה בין טווחי שעות
+            exist_start = datetime.strptime(row['שעת התחלה'], '%H:%M:%S').time()
+            exist_end = datetime.strptime(row['שעת סיום'], '%H:%M:%S').time()
+            
+            if not (end_t <= exist_start or start_t >= exist_end):
+                is_conflict = True
+                break
+        
+        if is_conflict:
+            st.error(f"הרכב {selected_car} כבר תפוס בשעות האלו!")
+        else:
+            new_booking = {
+                "עובד": user_name,
+                "רכב": selected_car,
+                "תאריך": str(date),
+                "שעת התחלה": start_t.strftime('%H:%M:%S'),
+                "שעת סיום": end_t.strftime('%H:%M:%S'),
+                "סיבה": reason
+            }
+            st.session_state.bookings = pd.concat([st.session_state.bookings, pd.DataFrame([new_booking])], ignore_index=True)
+            save_data(st.session_state.bookings)
+            st.success("ההזמנה בוצעה בהצלחה!")
 
-# הצגת יומן ההזמנות
-st.write("---")
-st.write("### 📋 יומן נסיעות מעודכן")
+# הצגת היומן בצורה יפה
+st.subheader("📋 לו״ז נסיעות מתוכנן")
 if not st.session_state.bookings.empty:
-    st.dataframe(st.session_state.bookings, use_container_width=True)
+    # מיון לפי תאריך ושעה
+    display_df = st.session_state.bookings.sort_values(by=["תאריך", "שעת התחלה"])
+    st.table(display_df)
 else:
-    st.info("אין הזמנות פעילות כרגע.")
+    st.info("אין הזמנות כרגע. היומן ריק.")
